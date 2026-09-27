@@ -54,21 +54,20 @@ def set_safety_gate_handler(handler):
     global SAFETY_GATE_HANDLER
     SAFETY_GATE_HANDLER = handler
 
+def is_command_sensitive(command: str) -> bool:
+    """Evalúa si un comando coincide con patrones críticos que requieren confirmación."""
+    cmd_clean = command.strip()
+    for safe in SAFE_PREFIXES:
+        if cmd_clean.startswith(safe):
+            return False
+    return any(kw in cmd_clean for kw in SENSITIVE_KEYWORDS)
+
 def check_safety_gate(command: str) -> bool:
     """
     Evalúa si un comando requiere confirmación humana obligatoria.
     Devuelve True si está autorizado para correr, False si fue rechazado.
     """
-    cmd_clean = command.strip()
-    
-    # Revisar lista blanca directa
-    for safe in SAFE_PREFIXES:
-        if cmd_clean.startswith(safe):
-            return True
-
-    # Revisar si contiene palabras sensibles
-    is_sensitive = any(kw in cmd_clean for kw in SENSITIVE_KEYWORDS)
-    if not is_sensitive:
+    if not is_command_sensitive(command):
         return True
 
     # Si hay un handler inyectado (por ejemplo desde la TUI), delegar en él

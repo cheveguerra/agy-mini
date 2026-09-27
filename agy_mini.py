@@ -169,7 +169,14 @@ def main():
     parser.add_argument("--model", "-m", type=str, help="Modelo Gemini a usar (ej. gemini-3.8-flash, gemini-2.5-pro)")
     parser.add_argument("--effort", "-e", type=str, choices=["none", "low", "medium", "high"], help="Presupuesto de thinking")
     parser.add_argument("--no-think", action="store_true", help="Desactiva el razonamiento thinking (thinking_budget=0)")
+    parser.add_argument("--self-test", action="store_true", help="Ejecuta auto-diagnóstico de integridad operativa y finaliza")
     args = parser.parse_args()
+
+    if args.self_test:
+        from core.commands import handle_slash_command
+        _, msg = handle_slash_command("/test", {"model": "check", "history": []})
+        Console().print(msg)
+        sys.exit(0)
 
     config = load_config()
     api_key = os.environ.get("GEMINI_API_KEY")

@@ -7,6 +7,8 @@ from typing import Dict, Any, Tuple
 import os
 import subprocess
 from core.usage import TokenTracker
+from tools.terminal import is_command_sensitive
+from tools.fs import list_dir
 
 def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bool, str]:
     """
@@ -25,6 +27,7 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
   [green]/model <identificador>[/green]   - Cambia el modelo (ej. /model gemini-3.8-flash, /model gemini-2.5-pro)
   [green]/effort <none|low|med|high>[/green] - Ajusta el nivel de razonamiento / thinking
   [green]/compact[/green]                 - Resume y compacta el historial acumulado
+  [green]/test[/green]                    - Ejecuta auto-diagnóstico de integridad de agy-mini
   [green]/clear[/green]                   - Limpia el historial de la conversación actual
   [green]/tokens[/green]                  - Muestra el consumo acumulado de tokens y costo estimado
   [green]/guardar[/green]                 - Guarda CONTEXTO.md y consolida AutoDream en SQLite
@@ -89,6 +92,29 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
   • Total Hoy: [bold]{t_summary.get('total_tokens', 0):,}[/bold] tokens (~${t_summary.get('estimated_cost_mxn', 0.0):.4f} MXN / [dim]${t_summary.get('estimated_cost_usd', 0.0):.4f} USD[/dim])
 """
         return True, msg
+
+    if cmd in ["/test", "/diagnostico"]:
+        # 1. Test Safety Gate
+        sg_ok = is_command_sensitive("rm -rf /tmp/test") and not is_command_sensitive("uptime")
+        # 2. Test Tools Nativas
+        fs_res = list_dir(".")
+        fs_ok = isinstance(fs_res, dict) and "items" in fs_res
+        # 3. Test Telemetría SQLite
+        try:
+            tracker = TokenTracker()
+            rate = tracker.get_usd_to_mxn_rate()
+            db_ok = rate > 0
+        except Exception:
+            db_ok = False
+            rate = 18.0
+
+        status_msg = f"""[bold cyan]🧪 Auto-Diagnóstico de Salud Operativa (Sysadmin Mini):[/bold cyan]
+  • [bold]{'✔' if sg_ok else '❌'}[/bold] Safety Gate (Filtro de riesgo): {'[green]OPERATIVO[/green]' if sg_ok else '[red]FALLA[/red]'}
+  • [bold]{'✔' if fs_ok else '❌'}[/bold] Herramientas Nativas Filesystem: {'[green]OPERATIVO[/green]' if fs_ok else '[red]FALLA[/red]'}
+  • [bold]{'✔' if db_ok else '❌'}[/bold] Telemetría SQLite y Divisas MXN (${rate:.2f}): {'[green]OPERATIVO[/green]' if db_ok else '[red]FALLA[/red]'}
+  • [bold]✔[/bold] Turnos Activos: {len(agent_state.get('history', []))} | Modelo: {agent_state.get('model')}
+"""
+        return True, status_msg
 
     if cmd == "/guardar":
         save_scripts = [

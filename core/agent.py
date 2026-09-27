@@ -71,6 +71,8 @@ class AgyMiniAgent:
         # Telemetría de tokens SQLite (libre de WAL)
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.tracker = TokenTracker()
+        self.recent_tool_calls: List[tuple] = []
+        self.turn_counter = 0
 
         self._init_client()
 
@@ -200,6 +202,7 @@ class AgyMiniAgent:
             self.tracker.record_usage(self.session_id, self.model_name, response.usage_metadata, "user_turn")
 
         had_tool_calls = False
+        self.turn_counter += 1
         # Bucle de llamadas a herramientas (Tool Calls)
         while response.function_calls:
             had_tool_calls = True
@@ -207,6 +210,13 @@ class AgyMiniAgent:
             for call in response.function_calls:
                 fn_name = call.name
                 fn_args = dict(call.args) if call.args else {}
+                args_key = (fn_name, str(sorted(fn_args.items())))
+
+                # Centinela de degradación: detectar si pide exactamente lo mismo que en turnos recientes
+                duplicate_calls = [t for t, k in self.recent_tool_calls[-12:] if k == args_key and t < self.turn_counter]
+                if duplicate_calls:
+                    self.emit(f"[bold yellow]⚠️ [Monitoreo] Re-ejecución redundante de {fn_name}(). Posible amnesia o degradación de contexto.[/bold yellow]")
+                self.recent_tool_calls.append((self.turn_counter, args_key))
 
                 self.set_status(f"Ejecutando tool: {fn_name}...")
                 self.emit(f"[dim cyan]🔧 [Tool Call] {fn_name}({fn_args})[/dim cyan]")
