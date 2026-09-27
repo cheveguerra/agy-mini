@@ -46,6 +46,7 @@ NATIVE_DECLARATIONS = [
 ]
 
 EFFORT_BUDGET_MAP = {
+    "none": 0,
     "low": 1024,
     "medium": 4096,
     "high": 16384
@@ -122,12 +123,72 @@ class AgyMiniAgent:
         # Reiniciar sesión con nueva configuración
         self._init_client()
 
+    def compact_history(self) -> bool:
+        """Compacta el historial conversacional resumiendo turnos anteriores sin romper la alternancia."""
+        if not self.chat or not hasattr(self.chat, "_history") or len(self.chat._history) < 3:
+            self.emit("[yellow]Historial insuficiente para compactar.[/yellow]")
+            return False
+
+        self.set_status("Compactando historial...")
+        try:
+            history_text = []
+            for item in self.chat._history:
+                role = item.role
+                texts = [p.text for p in item.parts if hasattr(p, "text") and p.text]
+                if texts:
+                    history_text.append(f"{role.upper()}: {' '.join(texts)}")
+
+            full_history = "\n".join(history_text)
+            prompt = (
+                "Resume en menos de 500 palabras el siguiente historial técnico de administración de sistemas. "
+                "Conserva estrictamente: acuerdos tomados, rutas de archivos modificados, comandos ejecutados "
+                "y estado actual del sistema. Homelab Proxmox VE:\n\n"
+                f"{full_history}"
+            )
+
+            # Inferencia rápida sin thinking para resumir
+            summary_response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=1024,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0)
+                )
+            )
+
+            summary_text = summary_response.text.strip() if summary_response.text else "Historial previo condensado."
+
+            self.chat._history = [
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=f"[Contexto previo compactado]:\n{summary_text}")]
+                ),
+                types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text="Entendido, mantengo en memoria el contexto compactado de los turnos previos. ¿En qué continuamos?")]
+                )
+            ]
+            self.emit(Panel(
+                Markdown(f"**Historial compactado exitosamente.**\n\n*Resumen activo:*\n{summary_text}"),
+                title="[bold cyan]Contexto Compactado[/bold cyan]",
+                border_style="cyan",
+                expand=False
+            ))
+            return True
+        except Exception as e:
+            self.emit(f"[red]Error al compactar historial: {e}[/red]")
+            return False
+        finally:
+            self.set_status("Listo")
+
     def process_turn(self, user_input: str):
         """Procesa una consulta del usuario gestionando múltiples llamadas a herramientas."""
         if not self.chat:
             self.emit("[red]Cliente Gemini no inicializado.[/red]")
             return
 
+        history_len_before = len(self.chat._history) if hasattr(self.chat, "_history") else 0
         self.set_status("Razonando y procesando...")
         if not self.status_handler:
             with console.status("[bold cyan]Razonando y procesando...[/bold cyan]", spinner="dots"):
@@ -138,8 +199,10 @@ class AgyMiniAgent:
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             self.tracker.record_usage(self.session_id, self.model_name, response.usage_metadata, "user_turn")
 
+        had_tool_calls = False
         # Bucle de llamadas a herramientas (Tool Calls)
         while response.function_calls:
+            had_tool_calls = True
             parts_responses = []
             for call in response.function_calls:
                 fn_name = call.name
@@ -186,6 +249,30 @@ class AgyMiniAgent:
                 border_style="green",
                 expand=False
             ))
+
+        # PODA DE RONDAS INTERMEDIAS DE TOOL CALLS:
+        # Reemplaza los pares intermedios por un único par limpio user -> model.
+        if had_tool_calls and hasattr(self.chat, "_history"):
+            try:
+                user_content = types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=user_input)]
+                )
+                model_content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=response.text or "Herramientas ejecutadas exitosamente.")]
+                )
+                self.chat._history = self.chat._history[:history_len_before] + [user_content, model_content]
+            except Exception as e:
+                self.emit(f"[dim yellow](Poda de herramientas omitida: {e})[/dim yellow]")
+
+        # AUTO-COMPACTACIÓN POR UMBRAL (60,000 tokens):
+        last_prompt_tokens = 0
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            last_prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+        if last_prompt_tokens > 60000:
+            self.emit(f"[yellow]⚠️ Contexto superó {last_prompt_tokens:,} tokens. Auto-compactando historial...[/yellow]")
+            self.compact_history()
 
         self.set_status("Listo")
 

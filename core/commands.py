@@ -23,7 +23,8 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
     if cmd in ["/help", "/ayuda"]:
         msg = """[bold cyan]Comandos de Control de Sysadmin Mini:[/bold cyan]
   [green]/model <identificador>[/green]   - Cambia el modelo (ej. /model gemini-3.8-flash, /model gemini-2.5-pro)
-  [green]/effort <low|med|high>[/green]    - Ajusta el nivel de razonamiento / thinking
+  [green]/effort <none|low|med|high>[/green] - Ajusta el nivel de razonamiento / thinking
+  [green]/compact[/green]                 - Resume y compacta el historial acumulado
   [green]/clear[/green]                   - Limpia el historial de la conversación actual
   [green]/tokens[/green]                  - Muestra el consumo acumulado de tokens y costo estimado
   [green]/guardar[/green]                 - Guarda CONTEXTO.md y consolida AutoDream en SQLite
@@ -41,11 +42,15 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
         return True, f"[bold green]✔ Modelo cambiado a:[/bold green] {arg}"
 
     if cmd == "/effort":
-        if arg.lower() in ["low", "medium", "high"]:
+        if arg.lower() in ["none", "low", "medium", "high"]:
             agent_state["effort"] = arg.lower()
             agent_state["reinit_chat"] = True
             return True, f"[bold green]✔ Thinking effort ajustado a:[/bold green] {arg.lower()}"
-        return True, "[red]Nivel de esfuerzo inválido. Usa: low, medium o high.[/red]"
+        return True, "[red]Nivel de esfuerzo inválido. Usa: none, low, medium o high.[/red]"
+
+    if cmd in ["/compact", "/compactar"]:
+        agent_state["trigger_compact"] = True
+        return True, "[bold cyan]Solicitando compactación de contexto...[/bold cyan]"
 
     if cmd == "/clear":
         agent_state["history"] = []
@@ -86,14 +91,18 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
         return True, msg
 
     if cmd == "/guardar":
-        # Disparar script de persistencia si existe
-        save_script = "/usr/local/bin/save_session.py"
-        if os.path.exists(save_script):
-            try:
-                subprocess.run(["python3", save_script], check=True, timeout=10)
-                return True, "[bold green]✔ Sesión guardada y replicada exitosamente con save_session.py[/bold green]"
-            except Exception as e:
-                return True, f"[red]Error al ejecutar save_session.py: {e}[/red]"
-        return True, "[yellow]Comando /guardar registrado localmente.[/yellow]"
+        save_scripts = [
+            "/usr/local/bin/save_session.py",
+            "/mnt/data1/agy_shared/tools/save_session.py",
+            os.path.expanduser("~/.local/bin/save_session.py")
+        ]
+        for script in save_scripts:
+            if os.path.exists(script):
+                try:
+                    subprocess.run(["python3", script], check=True, timeout=10)
+                    return True, f"[bold green]✔ Sesión guardada y replicada exitosamente con {script}[/bold green]"
+                except Exception as e:
+                    return True, f"[red]Error al ejecutar {script}: {e}[/red]"
+        return True, "[red]save_session.py no encontrado en ninguna ruta conocida.[/red]"
 
     return False, ""

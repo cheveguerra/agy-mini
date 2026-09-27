@@ -15,6 +15,22 @@ DEFAULT_AGENTS_PATHS = [
     "Z:/data1/agy_shared/AGENTS.md"
 ]
 
+EXCLUDED_HEADER_KEYWORDS = [
+    "descarga y búsqueda de libros",
+    "consulta y enriquecimiento de metadatos de libros",
+]
+
+def filter_sysadmin_rules(raw_text: str) -> str:
+    """Filtra programáticamente secciones ajenas al rol de sysadmin/desarrollo en PVE."""
+    sections = raw_text.split("\n## ")
+    filtered = [sections[0]]  # Mantener encabezado inicial
+    for sec in sections[1:]:
+        first_line = sec.split("\n", 1)[0].lower()
+        if any(kw in first_line for kw in EXCLUDED_HEADER_KEYWORDS):
+            continue
+        filtered.append("## " + sec)
+    return "\n".join(filtered)
+
 def load_agents_rules(config: Dict[str, Any]) -> str:
     """Busca y carga dinámicamente el archivo maestro AGENTS.md."""
     paths = config.get("system", {}).get("agents_rules_paths", DEFAULT_AGENTS_PATHS)
@@ -25,7 +41,7 @@ def load_agents_rules(config: Dict[str, Any]) -> str:
                 with open(resolved, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read().strip()
                     if content:
-                        return content
+                        return filter_sysadmin_rules(content)
             except Exception:
                 continue
     return ""

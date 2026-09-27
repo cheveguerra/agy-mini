@@ -12,6 +12,7 @@ import yaml
 import queue
 import threading
 import shutil
+import argparse
 from typing import Any, List
 
 from rich.console import Console
@@ -164,6 +165,12 @@ class MouseScrollableTextControl(FormattedTextControl):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Sysadmin Mini CLI - Agente Bare-Metal para Proxmox VE")
+    parser.add_argument("--model", "-m", type=str, help="Modelo Gemini a usar (ej. gemini-3.8-flash, gemini-2.5-pro)")
+    parser.add_argument("--effort", "-e", type=str, choices=["none", "low", "medium", "high"], help="Presupuesto de thinking")
+    parser.add_argument("--no-think", action="store_true", help="Desactiva el razonamiento thinking (thinking_budget=0)")
+    args = parser.parse_args()
+
     config = load_config()
     api_key = os.environ.get("GEMINI_API_KEY")
 
@@ -172,10 +179,16 @@ def main():
         print("Exporta tu clave con: export GEMINI_API_KEY='tu_clave' antes de iniciar.")
         sys.exit(1)
 
+    initial_model = args.model if args.model else config.get("agent", {}).get("default_model", "gemini-3.8-flash")
+    initial_effort = "none" if args.no_think else (args.effort if args.effort else config.get("agent", {}).get("default_effort", "medium"))
+    config.setdefault("agent", {})["default_model"] = initial_model
+    config["agent"]["default_effort"] = initial_effort
+
     agent_state = {
-        "model": config.get("agent", {}).get("default_model", "gemini-3.8-flash"),
-        "effort": config.get("agent", {}).get("default_effort", "medium"),
+        "model": initial_model,
+        "effort": initial_effort,
         "reinit_chat": False,
+        "trigger_compact": False,
         "history": []
     }
 
@@ -452,6 +465,9 @@ def main():
                     if agent_state.get("reinit_chat"):
                         agent.update_model_or_effort(agent_state["model"], agent_state["effort"])
                         agent_state["reinit_chat"] = False
+                    if agent_state.get("trigger_compact"):
+                        agent.compact_history()
+                        agent_state["trigger_compact"] = False
                 else:
                     # Procesar turno con Gemini y herramientas
                     agent.process_turn(item)
