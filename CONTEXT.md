@@ -66,3 +66,8 @@
 - [x] Corrección de viewport y cursor virtual en TUI: Integración de `get_cursor_position` en `MouseScrollableTextControl` y `ChatLog` para scroll real de rueda/teclado y auto-scroll continuo al final.
 - [x] Conversión y cálculo de costos en tiempo real en Pesos Mexicanos (MXN): Integración en `core/usage.py` y comando `/tokens` con consulta en vivo a APIs cambiarias públicas y caché SQLite con TTL de 6 horas.
 - [x] Blindaje de viewport anti-IndexError en TUI: Sobrecarga de `create_content` en `MouseScrollableTextControl` con clamp de `cursor_position.y` y wrapper seguro en `get_line` para erradicar crashes del bucle de eventos asyncio durante linewrapping.
+- [x] Optimización masiva de tokens: Poda de FunctionCall/FunctionResponse intermedios en `core/agent.py` manteniendo alternancia limpia `user -> model`.
+- [x] Filtrado programático de reglas ajenas a Sysadmin en `core/context.py` (ahorro de ~3,000 tokens por petición sin duplicar archivos).
+- [x] Compactación de contexto: Metacomando `/compact` y auto-compresión por umbral al superar 60,000 tokens de entrada.
+- [x] Flags CLI de arranque en `agy_mini.py` (`--effort`, `--no-think`, `--model`) con soporte de thinking budget 0.
+- [x] Publicación y versionado en repositorio GitHub (`github.com/cheveguerra/agy-mini`).
