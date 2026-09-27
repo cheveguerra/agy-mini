@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Backups y temporales
+*.bak
+*.tmp
+*.swp
+
+# Bases de datos y logs locales
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+
+# Entornos virtuales y secretos
+.env
+.venv/
+env/
+venv/

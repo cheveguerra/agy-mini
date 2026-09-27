@@ -1,0 +1,61 @@
+# Configuración de Sysadmin Mini (agy-mini)
+
+agent:
+  name: "agy-mini"
+  default_model: "gemini-3.8-flash"
+  default_effort: "medium"   # low, medium, high
+  max_output_tokens: 8192
+  temperature: 0.2
+
+system:
+  host: "pve"
+  ip: "192.168.100.200"
+  agents_rules_paths:
+    - "./AGENTS.md"
+    - "/mnt/data1/agy_shared/AGENTS.md"
+    - "/root/AGENTS.md"
+    - "Z:/data1/agy_shared/AGENTS.md"
+  webhook_url: "http://192.168.100.50:9020/v1/messages"
+
+timeouts:
+  sync_command_seconds: 15
+  async_threshold_seconds: 10
+
+filesystem:
+  max_read_lines: 250
+  max_list_items: 50
+  search_blacklists:
+    - "/mnt/data1"
+    - "/mnt/parity"
+    - "node_modules"
+    - ".git"
+    - ".venv"
+    - "__pycache__"
+
+safety_gate:
+  interactive_prompt: true
+  sensitive_keywords:
+    - "rm "
+    - "rmdir"
+    - "reboot"
+    - "poweroff"
+    - "shutdown"
+    - "systemctl stop"
+    - "systemctl restart"
+    - "pct stop"
+    - "pct destroy"
+    - "docker stop"
+    - "docker rm"
+    - "docker compose down"
+    - "docker-compose down"
+    - "chmod"
+    - "chown"
+    - "mkfs"
+    - "fdisk"
+    - "dd "
+
+mcp_servers:
+  sqlite_memory:
+    enabled: true
+    command: "/mnt/data1/agy_shared/tools/sqlite_memory_mcp.sh"
+    args: []

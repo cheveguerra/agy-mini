@@ -1,0 +1,99 @@
+"""
+Manejador de Metacomandos al Vuelo (/model, /effort, /clear, /guardar, /tasks).
+Permite ajustar parámetros de ejecución sin reiniciar la sesión ni perder el contexto.
+"""
+
+from typing import Dict, Any, Tuple
+import os
+import subprocess
+from core.usage import TokenTracker
+
+def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Evalúa si la entrada del usuario es un comando de control.
+    Devuelve (es_comando, mensaje_resultado).
+    """
+    parts = cmd_text.strip().split()
+    if not parts or not parts[0].startswith("/"):
+        return False, ""
+
+    cmd = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if cmd in ["/help", "/ayuda"]:
+        msg = """[bold cyan]Comandos de Control de Sysadmin Mini:[/bold cyan]
+  [green]/model <identificador>[/green]   - Cambia el modelo (ej. /model gemini-3.8-flash, /model gemini-2.5-pro)
+  [green]/effort <low|med|high>[/green]    - Ajusta el nivel de razonamiento / thinking
+  [green]/clear[/green]                   - Limpia el historial de la conversación actual
+  [green]/tokens[/green]                  - Muestra el consumo acumulado de tokens y costo estimado
+  [green]/guardar[/green]                 - Guarda CONTEXTO.md y consolida AutoDream en SQLite
+  [green]/status[/green]                  - Muestra modelo activo, esfuerzo y configuración
+  [green]/tasks[/green]                   - Lista las tareas desacopladas activas en segundo plano
+  [green]/exit[/green] o [green]/salir[/green]           - Finaliza la sesión
+"""
+        return True, msg
+
+    if cmd == "/model":
+        if not arg:
+            return True, f"[yellow]Modelo actual:[/yellow] {agent_state.get('model')}"
+        agent_state["model"] = arg
+        agent_state["reinit_chat"] = True
+        return True, f"[bold green]✔ Modelo cambiado a:[/bold green] {arg}"
+
+    if cmd == "/effort":
+        if arg.lower() in ["low", "medium", "high"]:
+            agent_state["effort"] = arg.lower()
+            agent_state["reinit_chat"] = True
+            return True, f"[bold green]✔ Thinking effort ajustado a:[/bold green] {arg.lower()}"
+        return True, "[red]Nivel de esfuerzo inválido. Usa: low, medium o high.[/red]"
+
+    if cmd == "/clear":
+        agent_state["history"] = []
+        agent_state["reinit_chat"] = True
+        return True, "[bold yellow]Historial conversacional limpiado.[/bold yellow]"
+
+    if cmd == "/status":
+        msg = f"""[bold cyan]Estado del Agente:[/bold cyan]
+  • Modelo: [green]{agent_state.get('model')}[/green]
+  • Thinking Effort: [green]{agent_state.get('effort')}[/green]
+  • Turnos en Historial: {len(agent_state.get('history', []))}
+"""
+        return True, msg
+
+    if cmd in ["/tokens", "/uso", "/cost", "/costo"]:
+        tracker = TokenTracker()
+        session_id = agent_state.get("session_id", "")
+        s_summary = tracker.get_session_summary(session_id) if session_id else {}
+        t_summary = tracker.get_today_summary()
+        rate = s_summary.get("exchange_rate") or t_summary.get("exchange_rate") or 18.0
+
+        msg = f"""[bold cyan]📊 Telemetría de Tokens de Sysadmin Mini[/bold cyan] [dim](Tasa: ${rate:.2f} MXN/USD)[/dim]:
+
+[bold green]Sesión Actual:[/bold green]
+  • Llamadas API: {s_summary.get('calls', 0)}
+  • Entrada: [dim]{s_summary.get('prompt_tokens', 0):,}[/dim] tokens
+  • Salida: [dim]{s_summary.get('candidates_tokens', 0):,}[/dim] tokens
+  • Pensamiento: [dim]{s_summary.get('thinking_tokens', 0):,}[/dim] tokens
+  • Total Sesión: [bold]{s_summary.get('total_tokens', 0):,}[/bold] tokens (~${s_summary.get('estimated_cost_mxn', 0.0):.4f} MXN / [dim]${s_summary.get('estimated_cost_usd', 0.0):.4f} USD[/dim])
+
+[bold yellow]Total Acumulado Hoy (Todas las sesiones):[/bold yellow]
+  • Llamadas API: {t_summary.get('calls', 0)}
+  • Entrada: [dim]{t_summary.get('prompt_tokens', 0):,}[/dim] tokens
+  • Salida: [dim]{t_summary.get('candidates_tokens', 0):,}[/dim] tokens
+  • Pensamiento: [dim]{t_summary.get('thinking_tokens', 0):,}[/dim] tokens
+  • Total Hoy: [bold]{t_summary.get('total_tokens', 0):,}[/bold] tokens (~${t_summary.get('estimated_cost_mxn', 0.0):.4f} MXN / [dim]${t_summary.get('estimated_cost_usd', 0.0):.4f} USD[/dim])
+"""
+        return True, msg
+
+    if cmd == "/guardar":
+        # Disparar script de persistencia si existe
+        save_script = "/usr/local/bin/save_session.py"
+        if os.path.exists(save_script):
+            try:
+                subprocess.run(["python3", save_script], check=True, timeout=10)
+                return True, "[bold green]✔ Sesión guardada y replicada exitosamente con save_session.py[/bold green]"
+            except Exception as e:
+                return True, f"[red]Error al ejecutar save_session.py: {e}[/red]"
+        return True, "[yellow]Comando /guardar registrado localmente.[/yellow]"
+
+    return False, ""
