@@ -73,7 +73,14 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
         session_id = agent_state.get("session_id", "")
         s_summary = tracker.get_session_summary(session_id) if session_id else {}
         t_summary = tracker.get_today_summary()
+        key_breakdown = tracker.get_today_breakdown_by_key()
         rate = s_summary.get("exchange_rate") or t_summary.get("exchange_rate") or 18.0
+
+        breakdown_text = ""
+        if key_breakdown:
+            breakdown_text = "\n[bold magenta]Desglose de Hoy por Llave API:[/bold magenta]\n"
+            for kb in key_breakdown:
+                breakdown_text += f"  • Llave [bold]{kb['key_suffix']}[/bold]: {kb['total_tokens']:,} tokens ({kb['calls']} calls) ~${kb['cost_mxn']:.4f} MXN [dim](${kb['cost_usd']:.4f} USD)[/dim]\n"
 
         msg = f"""[bold cyan]📊 Telemetría de Tokens de Sysadmin Mini[/bold cyan] [dim](Tasa: ${rate:.2f} MXN/USD)[/dim]:
 
@@ -90,7 +97,7 @@ def handle_slash_command(cmd_text: str, agent_state: Dict[str, Any]) -> Tuple[bo
   • Salida: [dim]{t_summary.get('candidates_tokens', 0):,}[/dim] tokens
   • Pensamiento: [dim]{t_summary.get('thinking_tokens', 0):,}[/dim] tokens
   • Total Hoy: [bold]{t_summary.get('total_tokens', 0):,}[/bold] tokens (~${t_summary.get('estimated_cost_mxn', 0.0):.4f} MXN / [dim]${t_summary.get('estimated_cost_usd', 0.0):.4f} USD[/dim])
-"""
+{breakdown_text}"""
         return True, msg
 
     if cmd in ["/test", "/diagnostico"]:

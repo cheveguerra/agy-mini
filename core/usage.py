@@ -44,9 +44,17 @@ class TokenTracker:
                     candidates_tokens INTEGER DEFAULT 0,
                     thinking_tokens INTEGER DEFAULT 0,
                     total_tokens INTEGER DEFAULT 0,
-                    call_type TEXT DEFAULT 'turn'
+                    call_type TEXT DEFAULT 'turn',
+                    api_key_suffix TEXT DEFAULT '...8jA'
                 );
             """)
+            # Migración automática si la tabla ya existía previamente
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(token_usage);")
+            cols = [c[1] for c in cur.fetchall()]
+            if "api_key_suffix" not in cols:
+                conn.execute("ALTER TABLE token_usage ADD COLUMN api_key_suffix TEXT DEFAULT '...8jA';")
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_usage_timestamp ON token_usage(timestamp);")
             conn.execute("""
@@ -122,10 +130,14 @@ class TokenTracker:
 
         return DEFAULT_EXCHANGE_RATE
 
-    def record_usage(self, session_id: str, model: str, usage_metadata: Any, call_type: str = "turn"):
+    def record_usage(self, session_id: str, model: str, usage_metadata: Any, call_type: str = "turn", api_key_suffix: str = ""):
         """Registra el consumo de un turno o respuesta de herramienta en SQLite."""
         if not usage_metadata:
             return
+
+        if not api_key_suffix:
+            raw_key = os.environ.get("GEMINI_API_KEY", "")
+            api_key_suffix = f"...{raw_key[-4:]}" if len(raw_key) >= 4 else "unknown"
 
         prompt = getattr(usage_metadata, "prompt_token_count", 0) or 0
         candidates = getattr(usage_metadata, "candidates_token_count", 0) or 0
@@ -142,9 +154,9 @@ class TokenTracker:
             with self._get_connection() as conn:
                 conn.execute("""
                     INSERT INTO token_usage (
-                        session_id, model, prompt_tokens, candidates_tokens, thinking_tokens, total_tokens, call_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?);
-                """, (session_id, model, prompt, candidates, thinking, total, call_type))
+                        session_id, model, prompt_tokens, candidates_tokens, thinking_tokens, total_tokens, call_type, api_key_suffix
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """, (session_id, model, prompt, candidates, thinking, total, call_type, api_key_suffix))
         except Exception as e:
             # Fallback silencioso para no romper la conversación por telemetría
             pass
@@ -220,3 +232,37 @@ class TokenTracker:
                 "calls": 0, "prompt_tokens": 0, "candidates_tokens": 0, "thinking_tokens": 0, "total_tokens": 0,
                 "estimated_cost_usd": 0.0, "estimated_cost_mxn": 0.0, "exchange_rate": rate
             }
+
+    def get_today_breakdown_by_key(self) -> list:
+        """Devuelve el consumo de hoy agrupado por cada llave API registrada."""
+        rate = self.get_usd_to_mxn_rate()
+        breakdown = []
+        try:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT 
+                        COALESCE(api_key_suffix, '...8jA'),
+                        COUNT(*),
+                        COALESCE(SUM(prompt_tokens), 0),
+                        COALESCE(SUM(candidates_tokens), 0),
+                        COALESCE(SUM(total_tokens), 0)
+                    FROM token_usage
+                    WHERE DATE(timestamp) = DATE('now', 'localtime')
+                    GROUP BY api_key_suffix
+                    ORDER BY SUM(total_tokens) DESC;
+                """)
+                for row in cur.fetchall():
+                    suf, calls, p, c, tot = row
+                    cost_usd = (p / 1_000_000 * COST_PER_M_INPUT) + (c / 1_000_000 * COST_PER_M_OUTPUT)
+                    cost_mxn = cost_usd * rate
+                    breakdown.append({
+                        "key_suffix": suf,
+                        "calls": calls,
+                        "total_tokens": tot,
+                        "cost_usd": cost_usd,
+                        "cost_mxn": cost_mxn
+                    })
+        except Exception:
+            pass
+        return breakdown

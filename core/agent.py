@@ -71,6 +71,7 @@ class AgyMiniAgent:
         # Telemetría de tokens SQLite (libre de WAL)
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.tracker = TokenTracker()
+        self.key_suffix = f"...{self.api_key[-4:]}" if len(self.api_key) >= 4 else "unknown"
         self.recent_tool_calls: List[tuple] = []
         self.turn_counter = 0
 
@@ -199,7 +200,7 @@ class AgyMiniAgent:
             response = self.chat.send_message(user_input)
 
         if hasattr(response, "usage_metadata") and response.usage_metadata:
-            self.tracker.record_usage(self.session_id, self.model_name, response.usage_metadata, "user_turn")
+            self.tracker.record_usage(self.session_id, self.model_name, response.usage_metadata, "user_turn", self.key_suffix)
 
         had_tool_calls = False
         self.turn_counter += 1
@@ -249,7 +250,7 @@ class AgyMiniAgent:
                 response = self.chat.send_message(parts_responses)
 
             if hasattr(response, "usage_metadata") and response.usage_metadata:
-                self.tracker.record_usage(self.session_id, self.model_name, response.usage_metadata, "tool_turn")
+                self.tracker.record_usage(self.session_id, self.model_name, response.usage_metadata, "tool_turn", self.key_suffix)
 
         # Mostrar respuesta final formateada en Markdown
         if response.text:
