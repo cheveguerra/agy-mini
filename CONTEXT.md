@@ -71,3 +71,4 @@
 - [x] Compactación de contexto: Metacomando `/compact` y auto-compresión por umbral al superar 60,000 tokens de entrada.
 - [x] Flags CLI de arranque en `agy_mini.py` (`--effort`, `--no-think`, `--model`) con soporte de thinking budget 0.
 - [x] Publicación y versionado en repositorio GitHub (`github.com/cheveguerra/agy-mini`).
+- [x] Blindaje de compactación de contexto en `core/agent.py`: anclaje determinista de entidades (rutas, IPs, contenedores), guardrail anti-colapso (<150 chars) y retención explícita de restricciones/prohibiciones negativas.

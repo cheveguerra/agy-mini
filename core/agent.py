@@ -4,6 +4,7 @@ Gestiona el ciclo de Function Calling, ejecución de herramientas nativas, MCP d
 """
 
 import os
+import re
 from typing import Dict, Any, List, Callable
 from rich.console import Console
 from rich.panel import Panel
@@ -51,6 +52,31 @@ EFFORT_BUDGET_MAP = {
     "medium": 4096,
     "high": 16384
 }
+
+def extract_critical_entities(text: str) -> Dict[str, List[str]]:
+    """
+    Extrae de forma determinista rutas de archivos, IPs y entornos/contenedores
+    del historial para anclarlos al resumen y evitar amnesia de entidades tras compactar.
+    """
+    # 1. Rutas absolutas del sistema de archivos
+    path_pattern = r'(?:~|/(?:mnt|root|home|etc|var|usr|tmp|opt|snapraid_logs))/[a-zA-Z0-9_\.\-]+(?:/[a-zA-Z0-9_\.\-]+)*'
+    raw_paths = re.findall(path_pattern, text)
+    clean_paths = sorted(list(set([p for p in raw_paths if not p.endswith(('.log.1', '.tmp'))])))[:15]
+
+    # 2. Direcciones IP y puertos LAN
+    ip_pattern = r'\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|127\.0\.0\.1)(?::\d{2,5})?\b'
+    clean_ips = sorted(list(set(re.findall(ip_pattern, text))))[:10]
+
+    # 3. Entornos, contenedores y VMs
+    ct_pattern = r'\b(?:LXC\s*\d+|VM\s*\d+|ct\s*\d+|pve|pve-mini)\b'
+    clean_cts = sorted(list(set(re.findall(ct_pattern, text, re.IGNORECASE))))[:10]
+
+    return {
+        "paths": clean_paths,
+        "ips": clean_ips,
+        "cts": clean_cts
+    }
+
 
 class AgyMiniAgent:
     def __init__(self, config: Dict[str, Any], api_key: str, output_handler: Callable[[Any], None] = None, status_handler: Callable[[str], None] = None):
@@ -127,7 +153,7 @@ class AgyMiniAgent:
         self._init_client()
 
     def compact_history(self) -> bool:
-        """Compacta el historial conversacional resumiendo turnos anteriores sin romper la alternancia."""
+        """Compacta el historial conversacional resumiendo turnos anteriores con anclaje determinista y guardrails."""
         if not self.chat or not hasattr(self.chat, "_history") or len(self.chat._history) < 4:
             self.emit("[yellow]Historial insuficiente para compactar (se requieren al menos 2 turnos previos completos).[/yellow]")
             return False
@@ -142,10 +168,15 @@ class AgyMiniAgent:
                     history_text.append(f"{role.upper()}: {' '.join(texts)}")
 
             full_history = "\n".join(history_text)
+
             prompt = (
-                "Resume en menos de 500 palabras el siguiente historial técnico de administración de sistemas. "
-                "Conserva estrictamente: acuerdos tomados, rutas de archivos modificados, comandos ejecutados "
-                "y estado actual del sistema. Homelab Proxmox VE:\n\n"
+                "Resume en menos de 500 palabras el siguiente historial técnico de administración de sistemas en Proxmox VE. "
+                "Estructura tu respuesta estrictamente en estas 3 secciones:\n"
+                "1. ESTADO ACTUAL Y FOCO: Tarea activa, problema atacado o diagnóstico en curso.\n"
+                "2. DECISIONES Y CAMBIOS: Acuerdos técnicos adoptados, rutas de archivos editadas y comandos clave ejecutados.\n"
+                "3. RESTRICCIONES Y PROHIBICIONES: Reglas explícitas o advertencias dictadas por el usuario sobre qué NO hacer, "
+                "parámetros protegidos o servicios que no deben reiniciarse o alterarse.\n\n"
+                "Historial conversacional:\n"
                 f"{full_history}"
             )
 
@@ -160,21 +191,39 @@ class AgyMiniAgent:
                 )
             )
 
-            summary_text = summary_response.text.strip() if summary_response.text else "Historial previo condensado."
+            summary_text = summary_response.text.strip() if summary_response.text else ""
+
+            # Guardrail anti-colapso: rechazar resumen si fue demasiado breve o vacío
+            if len(summary_text) < 150:
+                self.emit("[bold red]❌ Fallo de compactación: El resumen generado fue demasiado escueto (<150 caracteres). Se preserva el historial íntegro.[/bold red]")
+                return False
+
+            # Extracción y anclaje determinista de entidades para erradicar amnesia de rutas e IPs
+            entities = extract_critical_entities(full_history)
+            appendix_items = []
+            if entities["paths"]:
+                appendix_items.append(f"• Rutas clave detectadas: {', '.join(entities['paths'])}")
+            if entities["ips"]:
+                appendix_items.append(f"• IPs / Puertos LAN: {', '.join(entities['ips'])}")
+            if entities["cts"]:
+                appendix_items.append(f"• Entornos / Contenedores: {', '.join(entities['cts'])}")
+
+            if appendix_items:
+                summary_text += "\n\n### [Ancla Determinista de Entidades Activas]\n" + "\n".join(appendix_items)
 
             self.chat._history = [
                 types.Content(
                     role="user",
-                    parts=[types.Part.from_text(text=f"[Contexto previo compactado]:\n{summary_text}")]
+                    parts=[types.Part.from_text(text=f"[Contexto previo compactado y anclado]:\n{summary_text}")]
                 ),
                 types.Content(
                     role="model",
-                    parts=[types.Part.from_text(text="Entendido, mantengo en memoria el contexto compactado de los turnos previos. ¿En qué continuamos?")]
+                    parts=[types.Part.from_text(text="Entendido. Conservo en memoria activa el resumen estructurado, las restricciones y las entidades ancladas de los turnos previos. ¿En qué continuamos?")]
                 )
             ]
             self.emit(Panel(
-                Markdown(f"**Historial compactado exitosamente.**\n\n*Resumen activo:*\n{summary_text}"),
-                title="[bold cyan]Contexto Compactado[/bold cyan]",
+                Markdown(f"**Historial compactado y anclado exitosamente.**\n\n*Resumen activo:*\n{summary_text}"),
+                title="[bold cyan]Contexto Compactado & Anclado[/bold cyan]",
                 border_style="cyan",
                 expand=False
             ))
