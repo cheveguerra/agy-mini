@@ -128,8 +128,8 @@ class AgyMiniAgent:
 
     def compact_history(self) -> bool:
         """Compacta el historial conversacional resumiendo turnos anteriores sin romper la alternancia."""
-        if not self.chat or not hasattr(self.chat, "_history") or len(self.chat._history) < 3:
-            self.emit("[yellow]Historial insuficiente para compactar.[/yellow]")
+        if not self.chat or not hasattr(self.chat, "_history") or len(self.chat._history) < 4:
+            self.emit("[yellow]Historial insuficiente para compactar (se requieren al menos 2 turnos previos completos).[/yellow]")
             return False
 
         self.set_status("Compactando historial...")
@@ -278,11 +278,13 @@ class AgyMiniAgent:
                 self.emit(f"[dim yellow](Poda de herramientas omitida: {e})[/dim yellow]")
 
         # AUTO-COMPACTACIÓN POR UMBRAL (60,000 tokens):
+        # Solo se dispara si realmente hay historial acumulado de turnos previos (mínimo 4 mensajes / 2 turnos completos)
         last_prompt_tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             last_prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
-        if last_prompt_tokens > 60000:
-            self.emit(f"[yellow]⚠️ Contexto superó {last_prompt_tokens:,} tokens. Auto-compactando historial...[/yellow]")
+        history_len = len(self.chat._history) if hasattr(self.chat, "_history") else 0
+        if last_prompt_tokens > 60000 and history_len >= 4:
+            self.emit(f"[yellow]⚠️ Contexto acumulado superó {last_prompt_tokens:,} tokens ({history_len} mensajes). Auto-compactando historial...[/yellow]")
             self.compact_history()
 
         self.set_status("Listo")

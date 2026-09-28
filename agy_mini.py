@@ -173,7 +173,6 @@ def main():
     args = parser.parse_args()
 
     if args.self_test:
-        from core.commands import handle_slash_command
         _, msg = handle_slash_command("/test", {"model": "check", "history": []})
         Console().print(msg)
         sys.exit(0)
